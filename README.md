@@ -45,7 +45,7 @@ cd /Users/wx && dsh web
    - ⏸ 暂停（运行中可用）
    - ▶ 恢复（已暂停时可用）
    - ⏹ 取消（运行中或已暂停时可用）
-3. 空闲时按钮组自动隐藏。
+3. 按钮组**常驻**（不随空闲隐藏），仅按状态禁用：空闲/无暂停时暂停与恢复按钮变灰、取消按钮在既非运行也非暂停时变灰。
 
 也可以直接在输入框输入斜杠命令：`/pause`、`/resume`、`/cancel`（命令结果会以普通命令行形式出现在对话中）。
 
@@ -72,7 +72,7 @@ dsh-task-control/
 taskControl.pause(sessionId)  → { ok, text } | { ok: false, error }   // 中断当前回合 + 标记暂停
 taskControl.resume(sessionId) → { ok, text } | { ok: false, error }   // 清除标记 + 从暂停点继续（不重发原始提示词）
 taskControl.cancel(sessionId) → { ok, text } | { ok: false, error }   // 中断回合 + 清除标记
-taskControl.state(sessionId)  → { status, paused, resumeContent }     // status: idle|running|offline（离线也能读暂停态）
+taskControl.state(sessionId)  → { status, paused, forced, interruptedTool, deferredTools, resumeContent }  // status: idle|running|offline（离线也能读暂停态）
 ```
 
 消费方（例如 `dsh-task-batch` 的「全部暂停/恢复/取消」）用 `ctx.get("taskControl")` 读取，不要复制实现——本服务的语义即唯一事实来源。
