@@ -3,14 +3,20 @@
 // a fake agent + session. Pause state now lives in the plugin's own durable
 // store (Route A: no custom session event types), so assertions read the
 // taskControl service state instead of session events.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { apply } from "/Users/wx/Desktop/DSH/dsh-task-control/lib/index.js";
+import { apply } from "../lib/index.js";
 
 // Isolate the durable state store in a temp dir (hermetic, no ~/.dsh writes).
 process.env.DSH_TASK_CONTROL_STATE_DIR = mkdtempSync(join(tmpdir(), "dsh-task-control-test-"));
 const stateRoot = process.env.DSH_TASK_CONTROL_STATE_DIR;
+
+// Seed the pause-granularity settings with `force` so the bare `/pause`
+// assertions below keep exercising force behavior (the shipped default is
+// `safe` + `wait`; a later test section switches the settings to verify it).
+const settingsFile = join(stateRoot, "settings.json");
+writeFileSync(settingsFile, JSON.stringify({ defaultMode: "force", safeReasoning: "wait" }), "utf8");
 
 // --- fake services ----------------------------------------------------------
 const registeredCommands = [];
@@ -374,6 +380,47 @@ try {
   fakeAgent.status = "idle";
   taskControl.resume(fakeAgent.id);
   if (taskControl.state(fakeAgent.id).paused !== false) throw new Error("resume should clear the durable state");
+
+  // --- pause-granularity settings: bare /pause follows the settings -----------
+  // Switch the durable settings to the shipped default (`safe` + `wait`): a
+  // bare /pause must NOT interrupt anything, land at the safe boundary after
+  // reasoning completes, and resume needs no confirmation (no forced tool).
+  writeFileSync(settingsFile, JSON.stringify({ defaultMode: "safe", safeReasoning: "wait" }), "utf8");
+  fakeAgent.status = "running";
+  const cancelledBeforeSafeDefault = fakeAgent.cancelled.length;
+  const defaultSafePause = await handler("pause")(invocation(fakeAgent));
+  console.log("pause(default settings=safe wait) ->", JSON.stringify(defaultSafePause));
+  if (fakeAgent.cancelled.length !== cancelledBeforeSafeDefault) throw new Error("safe-wait default must NOT cancel the running turn immediately");
+  if (taskControl.state(fakeAgent.id).paused !== false) throw new Error("safe-wait default must not persist yet");
+  // reasoning completes -> pause applies at the boundary, marked non-forced
+  fireEvent({ type: "assistant/message", data: { turn: 9, step: 1, message: { role: "assistant", content: [{ type: "text", text: "reasoned while pausing" }], source: { kind: "model", provider: "p", model: "m" } }, usage: {} } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const safeDefaultState = taskControl.state(fakeAgent.id);
+  if (safeDefaultState.paused !== true) throw new Error("safe-wait default should persist after reasoning completes");
+  if (safeDefaultState.forced !== false) throw new Error("safe-wait default must not be forced");
+  fakeAgent.status = "idle";
+  await handler("resume")(invocation(fakeAgent));
+  if (taskControl.state(fakeAgent.id).paused !== false) throw new Error("resume should clear after a safe-wait default pause");
+
+  // explicit `/pause force` still overrides the safe default
+  fakeAgent.status = "running";
+  fireEvent({ type: "tool/call", data: { callId: "call-9", name: "bash", arguments: JSON.stringify({ command: "echo explicit", description: "显式强制暂停验证" }) } });
+  const cancelledBeforeExplicit = fakeAgent.cancelled.length;
+  const explicitForce = await handler("pause")({ ...invocation(fakeAgent), rawInput: "force" });
+  console.log("pause(explicit force over safe default) ->", JSON.stringify(explicitForce));
+  if (fakeAgent.cancelled.length !== cancelledBeforeExplicit + 1) throw new Error("explicit /pause force must interrupt even with a safe default");
+  const explicitState = taskControl.state(fakeAgent.id);
+  if (explicitState.paused !== true || explicitState.forced !== true || explicitState.interruptedTool?.callId !== "call-9") {
+    throw new Error(`explicit force pause state wrong: ${JSON.stringify(explicitState)}`);
+  }
+  fakeAgent.status = "idle";
+  const explicitResume = await handler("resume")({ ...invocation(fakeAgent), rawInput: "confirm rerun" });
+  console.log("resume(explicit force, confirm) ->", JSON.stringify(explicitResume));
+  if (explicitResume.kind !== "success") throw new Error("confirmed resume after explicit force pause should succeed");
+  if (taskControl.state(fakeAgent.id).paused !== false) throw new Error("confirmed resume should clear the explicit force pause");
+
+  // settings route payload validation is exercised through the file directly;
+  // the route handler only accepts force|safe / stop|wait and keeps old values.
 
   console.log("\nALL HOST HALF CHECKS PASSED");
 } finally {
