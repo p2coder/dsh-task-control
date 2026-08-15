@@ -34,6 +34,7 @@ const goalsService = {
 };
 
 const provided = {};
+const sessionListeners = {};
 const ctx = {
   logger: { warn: (...a) => console.log("[warn]", ...a) },
   get(key) {
@@ -41,6 +42,7 @@ const ctx = {
     return undefined;
   },
   provide(key, value) { provided[key] = value; },
+  on(name, fn) { sessionListeners[name] = fn; },
   agents: { get(id) { return id === fakeAgent.id ? fakeAgent : undefined; } },
   commands: {
     register(definition) {
@@ -169,5 +171,38 @@ const svcCancel = taskControl.cancel(fakeAgent.id);
 console.log("service cancel ->", JSON.stringify(svcCancel));
 if (svcCancel.ok !== true) throw new Error("service cancel failed");
 if (taskControl.state(fakeAgent.id).paused !== false) throw new Error("service cancel should clear paused");
+
+// --- deferred pause: a running tool is NOT interrupted; pause lands at the
+// --- safe boundary (tool/result) --------------------------------------------
+const fireEvent = (event) => sessionListeners["session/event"]({ id: fakeAgent.id }, event);
+fakeAgent.status = "running";
+fireEvent({ type: "tool/call", data: { callId: "call-1", name: "bash", arguments: JSON.stringify({ command: "sleep 5 && echo done", description: "等待并输出 done" }) } });
+const cancelledBefore = fakeAgent.cancelled.length;
+const pausedBefore = session.events.filter((e) => e.type === "task-control/paused").length;
+const deferred = taskControl.pause(fakeAgent.id);
+console.log("deferred pause ->", JSON.stringify(deferred));
+if (!/safe boundary|pausing/.test(deferred.text)) throw new Error("pause should report deferral while a tool runs");
+if (fakeAgent.cancelled.length !== cancelledBefore) throw new Error("deferred pause must NOT cancel the running tool");
+// the in-flight tool completes -> pause applies (asynchronously via microtask)
+fireEvent({ type: "tool/result", data: { message: { source: { callId: "call-1" } } } });
+await new Promise((resolve) => setTimeout(resolve, 10));
+if (fakeAgent.cancelled.length !== cancelledBefore + 1) throw new Error("safe boundary should cancel the turn");
+const pausedAfter = session.events.filter((e) => e.type === "task-control/paused").length;
+if (pausedAfter !== pausedBefore + 1) throw new Error("safe boundary should append the paused event");
+if (taskControl.state(fakeAgent.id).paused !== true) throw new Error("state should be paused after safe boundary");
+console.log("deferred pause applied at safe boundary (tool completed, no interrupt)");
+
+// --- cancel during a running tool: terminate NOW + report purpose + side effects ---
+fakeAgent.status = "running";
+fireEvent({ type: "tool/call", data: { callId: "call-2", name: "bash", arguments: JSON.stringify({ command: "rm -rf /tmp/x", description: "清理临时目录" }) } });
+const cancelledBefore2 = fakeAgent.cancelled.length;
+const cancelDuringTool = taskControl.cancel(fakeAgent.id);
+console.log("cancel during tool ->", JSON.stringify(cancelDuringTool));
+if (fakeAgent.cancelled.length !== cancelledBefore2 + 1) throw new Error("cancel must terminate the running tool immediately");
+if (!/清理临时目录/.test(cancelDuringTool.text)) throw new Error("cancel reply should include the tool's expected purpose");
+if (!/副作用/.test(cancelDuringTool.text)) throw new Error("cancel reply should remind about side effects");
+if (taskControl.state(fakeAgent.id).paused !== false) throw new Error("cancel should clear paused state");
+
+console.log("\nALL HOST HALF CHECKS PASSED");
 
 console.log("\nALL HOST HALF CHECKS PASSED");
