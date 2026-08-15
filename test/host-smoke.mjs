@@ -203,6 +203,52 @@ if (!/清理临时目录/.test(cancelDuringTool.text)) throw new Error("cancel r
 if (!/副作用/.test(cancelDuringTool.text)) throw new Error("cancel reply should remind about side effects");
 if (taskControl.state(fakeAgent.id).paused !== false) throw new Error("cancel should clear paused state");
 
+// --- force pause with a running tool: interrupt NOW, remember the tool, resume needs confirm ---
+fakeAgent.status = "running";
+fireEvent({ type: "tool/call", data: { callId: "call-3", name: "bash", arguments: JSON.stringify({ command: "migrate-db", description: "执行数据库迁移" }) } });
+const cancelledBefore3 = fakeAgent.cancelled.length;
+const forcedPause = taskControl.pause(fakeAgent.id, { mode: "force" });
+console.log("force pause ->", JSON.stringify(forcedPause));
+if (fakeAgent.cancelled.length !== cancelledBefore3 + 1) throw new Error("force pause must cancel the running tool immediately");
+if (!/迁移/.test(forcedPause.text)) throw new Error("force pause reply should name the interrupted tool's purpose");
+const forcedState = taskControl.state(fakeAgent.id);
+if (forcedState.paused !== true || forcedState.forced !== true || forcedState.interruptedTool?.name !== "bash") {
+  throw new Error(`force pause state wrong: ${JSON.stringify(forcedState)}`);
+}
+// resume without confirm -> needConfirmation
+fakeAgent.status = "idle";
+const followupsBefore = fakeAgent.followups.length;
+const resumeNoConfirm = taskControl.resume(fakeAgent.id);
+console.log("resume(forced, no confirm) ->", JSON.stringify(resumeNoConfirm));
+if (resumeNoConfirm.ok !== false || resumeNoConfirm.needConfirmation !== true) throw new Error("forced resume without confirm should need confirmation");
+if (fakeAgent.followups.length !== followupsBefore) throw new Error("unconfirmed resume must not followup");
+// resume with confirm -> followup includes the re-execute instruction
+const resumedEventsBefore = session.events.filter((e) => e.type === "task-control/resumed").length;
+const resumeConfirmed = taskControl.resume(fakeAgent.id, { confirm: true });
+console.log("resume(forced, confirm) ->", JSON.stringify(resumeConfirmed));
+if (resumeConfirmed.ok !== true) throw new Error("confirmed forced resume failed");
+if (fakeAgent.followups.length !== followupsBefore + 1) throw new Error("confirmed resume should followup");
+const resumeText = (fakeAgent.followups[fakeAgent.followups.length - 1].content ?? []).map((b) => b.text ?? "").join("\n");
+if (!/重新执行|迁移/.test(resumeText)) {
+  throw new Error("forced resume message should instruct re-execution of the interrupted tool");
+}
+if (taskControl.state(fakeAgent.id).paused !== false) throw new Error("confirmed resume should clear paused");
+
+// --- safe pause, reasoning granularity 'wait': LLM is NOT interrupted; pause after reasoning completes ---
+fakeAgent.status = "running";
+const cancelledBefore4 = fakeAgent.cancelled.length;
+const pausedBefore4 = session.events.filter((e) => e.type === "task-control/paused").length;
+const waitPause = taskControl.pause(fakeAgent.id, { mode: "safe", reason: "wait" });
+console.log("safe wait pause ->", JSON.stringify(waitPause));
+if (fakeAgent.cancelled.length !== cancelledBefore4) throw new Error("wait-mode pause must NOT cancel the running reasoning");
+// reasoning completes -> pause applies
+fireEvent({ type: "assistant/message", data: { turn: 1, step: 2, message: { role: "assistant", content: [{ type: "text", text: "finished reasoning" }], source: { kind: "model", provider: "p", model: "m" } }, usage: {} } });
+await new Promise((resolve) => setTimeout(resolve, 10));
+if (fakeAgent.cancelled.length !== cancelledBefore4 + 1) throw new Error("wait-mode pause should cancel after reasoning completes");
+if (session.events.filter((e) => e.type === "task-control/paused").length !== pausedBefore4 + 1) throw new Error("wait-mode pause should append paused event after reasoning");
+if (taskControl.state(fakeAgent.id).forced !== false) throw new Error("safe pause must not be marked forced");
+console.log("safe wait pause applied after reasoning completed (LLM not interrupted)");
+
 console.log("\nALL HOST HALF CHECKS PASSED");
 
 console.log("\nALL HOST HALF CHECKS PASSED");
