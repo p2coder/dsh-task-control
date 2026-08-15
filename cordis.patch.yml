@@ -1,0 +1,8 @@
+# dsh-task-control bundle patch: one dual-face row. The host half
+# (lib/index.js) registers the /pause /resume /cancel commands and the
+# `taskControl` session projection; the browser half (lib/client.js,
+# discovered through the package.json dsh.client declaration) renders the
+# Pause/Resume/Cancel controls in the composer tool row.
+- insert:
+    - id: task-control
+      name: 'dsh-task-control'
