@@ -1,5 +1,7 @@
 # dsh-task-control
 
+[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
+
 [English](README.en.md) | 中文
 
 任务控制插件（DSH Web）：提交对话任务后，除了现有的"停止/取消"，还提供 **暂停任务**、**恢复任务** 两个控制，以 Cordis 双面插件（宿主端 + 浏览器端）实现。

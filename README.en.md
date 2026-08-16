@@ -1,5 +1,7 @@
 # dsh-task-control
 
+[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
+
 English | [中文](README.md)
 
 Task control plugin for DSH Web: in addition to the built-in "stop/cancel", provides **pause** and **resume** controls for the conversation task, implemented as a dual-face Cordis plugin (host + browser).
@@ -45,9 +47,22 @@ After install, **fully restart dsh web** (host plugins do not hot-reload) and re
    - ▶ Resume (available while paused)
    - ⏹ Cancel (available while running or paused)
 3. The button group is **always visible** (it does not hide when idle); buttons disable per state: Pause/Resume gray out when idle/not paused, Cancel grays out when neither running nor paused.
+
+   The image below highlights the task-control buttons next to the input box. From left to right, they are **Pause, Resume, and Cancel**. Gray buttons are unavailable in the current state; dark buttons are clickable.
+
+   ![Location and states of the Pause, Resume, and Cancel buttons](fig/button%20illustrate_en.png)
+
 4. Settings → "Task control": configure the default pause granularity (default `safe` + `wait`); bare `/pause` and the pause button follow it.
 
+   Open "Settings" in the bottom-left corner, select "Task control," choose the default pause mode and the reasoning granularity for safe pauses, then click "Save" to apply the changes.
+
+   ![Steps for configuring task pause granularity](fig/Task%20pause%20granularity%20configuration_en.png)
+
 Slash commands also work in the input box: `/pause`, `/resume`, `/cancel` (results appear as ordinary command lines in the conversation).
+
+You can also explicitly select the pause behavior when entering `/pause`, for example `/pause force` or `/pause safe wait`; the input box displays the available parameters:
+
+![Using task controls with a slash command](fig/commond%20illustrate_en.png)
 
 **Pause semantics (follows the settings; shipped default safe wait)**: a bare `/pause` (and the dock pause button) without an explicit mode uses the default granularity from Settings → "Task control" (default `safe wait`: lands after reasoning/tools finish, never interrupts work). An explicit `/pause force` interrupts the current turn immediately: in-flight tools are cancelled and the LLM output is cut; the pause snapshot records the interrupted tool (`interruptedTool`); resume needs confirmation first: `/resume confirm rerun` (re-run the interrupted tool) / `/resume confirm skip` (skip it); tools that actually completed are auto-skipped, never re-run. `/pause safe [stop|wait]` explicitly selects a safe pause: `safe wait` lands after reasoning completes and before tool dispatch; the undispatched tools are recorded as `deferredTools`, and resume also asks for confirmation.
 
