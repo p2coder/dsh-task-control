@@ -45,9 +45,22 @@ dsh plugin --profile web add github:p2coder/dsh-task-control
    - ▶ 恢复（已暂停时可用）
    - ⏹ 取消（运行中或已暂停时可用）
 3. 按钮组**常驻**（不随空闲隐藏），仅按状态禁用：空闲/无暂停时暂停与恢复按钮变灰、取消按钮在既非运行也非暂停时变灰。
+
+   下图标出了输入框旁的任务控制按钮；从左到右依次为**暂停、恢复、取消**，灰色表示当前不可点击，黑色表示可点击。
+
+   ![暂停、恢复、取消按钮的位置与状态说明](fig/button%20illustrate.png)
+
 4. 设置 →「任务控制」：配置默认暂停粒度（默认 `safe` + `wait`），裸 `/pause` 与暂停按钮按此执行。
 
+   进入左下角「设置」→「任务控制」，选择默认暂停模式和安全暂停的推理粒度，修改后点击「保存」即可生效。
+
+   ![任务暂停粒度配置步骤](fig/Task%20pause%20granularity%20configuration.png)
+
 也可以直接在输入框输入斜杠命令：`/pause`、`/resume`、`/cancel`（命令结果会以普通命令行形式出现在对话中）。
+
+输入 `/pause` 时也可以显式指定暂停方式，例如 `/pause force` 或 `/pause safe wait`；输入框会提示可用参数：
+
+![通过斜杠命令调用任务控制](fig/commond%20illustrate.png)
 
 **暂停语义（默认跟随设置，出厂为 safe wait）**：`/pause`（及 dock 暂停按钮）未显式指定模式时，按设置 →「任务控制」中的默认粒度执行（默认 `safe wait`：等推理/工具完成后才落地，不中断工作）。显式 `/pause force` 立即中断当前回合：在途工具被取消、LLM 输出被切断，暂停快照记录被中断的工具（`interruptedTool`）；恢复时需先确认：`/resume confirm rerun`（重新执行被中断的工具）/ `/resume confirm skip`（跳过该工具）；工具实际已完成的自动跳过、绝不重跑。`/pause safe [stop|wait]` 显式指定安全暂停：`safe wait` 落在推理完成后、工具派发前，未派发的工具记录为 `deferredTools`，恢复同样需确认。
 
