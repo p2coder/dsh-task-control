@@ -49,6 +49,18 @@ const goalsService = {
 
 const provided = {};
 const sessionListeners = {};
+// Fake host webserver mirroring dsh-host-webserver's contract: register()
+// throws on duplicate (kind, path) and returns a disposer removing the route.
+const webServerRoutes = new Map();
+const fakeWebServer = {
+  register(route) {
+    if (webServerRoutes.has(route.path)) throw new Error(`webserver: duplicate prefix route "${route.path}"`);
+    webServerRoutes.set(route.path, route);
+    return () => { webServerRoutes.delete(route.path); };
+  }
+};
+// Collect disposers wired through ctx.effect (mirrors Cordis effect semantics).
+const effectDisposers = [];
 const ctx = {
   logger: { warn: (...a) => console.log("[warn]", ...a) },
   get(key) {
@@ -58,6 +70,12 @@ const ctx = {
   provide(key, value) { provided[key] = value; },
   on(name, fn) { sessionListeners[name] = fn; },
   agents: { get(id) { return id === fakeAgent.id ? fakeAgent : undefined; } },
+  webServer: fakeWebServer,
+  effect(callback) {
+    const disposer = callback();
+    if (typeof disposer === "function") effectDisposers.push(disposer);
+    return disposer;
+  },
   commands: {
     register(definition) {
       // Mirror dsh-commands normalizeDefinition validation.
@@ -83,6 +101,17 @@ try {
   if (typeof taskControl.pause !== "function" || typeof taskControl.resume !== "function" || typeof taskControl.cancel !== "function" || typeof taskControl.state !== "function") {
     throw new Error("taskControl service missing pause/resume/cancel/state methods");
   }
+
+  // --- webServer route lifecycle (hot unload must not leak the route) ---------
+  // The /task-control prefix must be registered AND its disposer wired through
+  // ctx.effect: without the effect wrap, a hot unload (plugin-toggle) would
+  // leave the route in the shared host webserver and the next re-apply would
+  // throw "webserver: duplicate prefix route".
+  if (!webServerRoutes.has("/task-control")) throw new Error("webServer route /task-control not registered");
+  if (effectDisposers.length !== 1) throw new Error(`webServer route disposer must be wired via ctx.effect, got ${effectDisposers.length}`);
+  effectDisposers[0]();
+  if (webServerRoutes.has("/task-control")) throw new Error("route must be removed when the effect disposer runs (hot unload)");
+  console.log("webServer route lifecycle -> registered, effect-disposed, removed OK");
 
   const handler = (name) => registeredCommands.find((c) => c.name === name).handler;
   const invocation = (agent) => ({ agent, rawInput: "", commandId: "t1" });
