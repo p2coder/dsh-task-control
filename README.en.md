@@ -10,6 +10,8 @@ English | [中文](README.md)
 
 Adds task **pause, resume, and cancel** controls to DSH Web. Supports safe and force pause, then resumes from the pause point without repeating completed work.
 
+Currently adapted to DSH v0.1.1-rc.2 (latest version).
+
 ## Installation
 
 ```bash
