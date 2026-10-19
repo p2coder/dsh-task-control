@@ -59,6 +59,7 @@ const fakeWebServer = {
     return () => { webServerRoutes.delete(route.path); };
   }
 };
+const v4Agents = new Map();
 // Collect disposers wired through ctx.effect (mirrors Cordis effect semantics).
 const effectDisposers = [];
 const ctx = {
@@ -69,7 +70,7 @@ const ctx = {
   },
   provide(key, value) { provided[key] = value; },
   on(name, fn) { sessionListeners[name] = fn; },
-  agents: { get(id) { return id === fakeAgent.id ? fakeAgent : undefined; } },
+  agents: { get(id) { return id === fakeAgent.id ? fakeAgent : v4Agents.get(id); } },
   webServer: fakeWebServer,
   effect(callback) {
     const disposer = callback();
@@ -450,6 +451,48 @@ try {
 
   // settings route payload validation is exercised through the file directly;
   // the route handler only accepts force|safe / stop|wait and keeps old values.
+
+  // --- DSH 0.2.x session shape: snapshotEvents() + format v4 message source --
+  // 0.2.x drops the public `session.events` array and rejects the retired
+  // `{ kind: "plugin", plugin }` wrapper: a producing plugin must own its kind.
+  const v4Events = [{
+    type: "user/message",
+    data: { id: "v4-m1", role: "user", content: [{ type: "text", text: "v4 prompt" }], source: { kind: "user" } },
+    seq: 0,
+    time: 1
+  }];
+  const v4Agent = {
+    id: "session-v4",
+    status: "running",
+    session: {
+      seq: 1,
+      snapshotEvents() { return v4Events; }
+    },
+    cancelled: [],
+    followups: [],
+    cancel(cause, options) { this.cancelled.push({ cause, options }); },
+    followup(message) {
+      // Mirror format v4 admission: the retired wrapper must be refused.
+      if (message.source?.kind !== "plugin:task-control") throw new Error("format v4 message requires a producer-owned source kind");
+      this.followups.push(message);
+    }
+  };
+  v4Agents.set(v4Agent.id, v4Agent);
+  ctx.agents.get = (id) => (id === fakeAgent.id ? fakeAgent : v4Agents.get(id));
+
+  const v4Pause = await handler("pause")({ ...invocation(v4Agent), rawInput: "force" });
+  console.log("pause(v4 session) ->", JSON.stringify(v4Pause));
+  if (v4Pause.kind !== "success") throw new Error("v4 pause failed");
+  if (v4Agent.cancelled.length !== 1) throw new Error("v4 pause did not cancel the running turn");
+  const v4State = taskControl.state(v4Agent.id);
+  if (v4State.resumeContent?.[0]?.text !== "v4 prompt") throw new Error("snapshotEvents() must feed lastUserPrompt");
+
+  v4Agent.status = "idle";
+  const v4Resume = await handler("resume")({ ...invocation(v4Agent), rawInput: "confirm rerun" });
+  console.log("resume(v4 session) ->", JSON.stringify(v4Resume));
+  if (v4Resume.kind !== "success") throw new Error("v4 resume failed");
+  if (v4Agent.followups.length !== 1) throw new Error("v4 resume did not followup");
+  if (v4Agent.followups[0].source?.kind !== "plugin:task-control") throw new Error("v4 resume must emit a producer-owned source kind");
 
   console.log("\nALL HOST HALF CHECKS PASSED");
 } finally {
